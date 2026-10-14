@@ -9,4 +9,5 @@
 ## 版本管理
 
 - 项目使用 Git 进行版本管理。
+- 远程仓库：`https://github.com/wangTwoDogs/10g_toolbox.git`（`origin`）。
 - 每次对话完成项目变更后，自动提交本次变更。
