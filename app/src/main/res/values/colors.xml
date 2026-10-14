@@ -1,0 +1,13 @@
+<resources>
+    <color name="toolbox_primary">#1763A6</color>
+    <color name="toolbox_on_primary">#FFFFFF</color>
+    <color name="toolbox_primary_container">#D3E5FF</color>
+    <color name="toolbox_on_primary_container">#002D52</color>
+    <color name="toolbox_secondary">#805600</color>
+    <color name="toolbox_secondary_container">#FFE2A5</color>
+    <color name="toolbox_surface">#F8F9FD</color>
+    <color name="toolbox_on_surface">#191C20</color>
+    <color name="toolbox_on_surface_variant">#42474E</color>
+    <color name="toolbox_outline">#727880</color>
+    <color name="toolbox_error">#BA1A1A</color>
+</resources>

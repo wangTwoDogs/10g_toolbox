@@ -1,0 +1,26 @@
+验证日期：2026-10-14（中国时间）
+版本：1.0.0
+
+构建与检查
+JDK17 / Gradle8.9 / AGP8.7.3 / Android SDK35。
+assembleDebug、testDebugUnitTest、compileDebugAndroidTestJavaWithJavac、lintDebug 均通过。
+4 项 JVM 单元测试通过，验证输出文件名、中文名称、时长、长 Unicode 名称。
+APK 的 v2 签名通过 apksigner verify。
+
+实际安卓测试
+Android15 / API35，Pixel5 x86_64 模拟器，使用既有 WHPX，不修改系统虚拟化功能。
+运行 tools/build.ps1 -DeviceTests -DeviceSerial emulator-5554 -UseSessionProxy。
+AndroidJUnitRunner：OK (8 tests)，0 失败，0 忽略。
+覆盖：无音轨视频、WAV 转 AAC 后实际解码、损坏输入、AAC 压缩包及时间戳保持、
+10 秒时间戳空隙的末帧时长、预取消、真实 Activity + 前台服务、H264/AAC 双轨视频提取。
+已检查实际界面截图；AndroidRuntime 日志无异常。
+
+测试数据
+所有动态媒体均登记在独有的应用缓存目录，@After 精确删除，8 项测试清理检查全部通过。
+已额外检查应用 cache 为空；只读输入长度在前台服务测试中保持不变。
+模拟器截图临时文件 /sdcard/Download/toolbox-ui-test-20261014.png 已删除。
+交付 APK、界面截图和测试日志保存在被 Git 忽略的 dist/ 目录，作为本次验证产物保留。
+
+验证范围
+已实际运行 API35；其他支持的系统版本通过 API 静态检查，尚未逐个真机测试。
+设备未提供的解码/编码能力、DRM 及异常媒体会明确提示不支持。

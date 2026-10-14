@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">二狗叔叔的工具箱</string>
+    <string name="notification_channel">音频提取</string>
+    <string name="notification_title">正在提取音频</string>
+    <string name="cancel">取消提取</string>
+    <string name="select_video">选择视频</string>
+    <string name="extract_audio">提取并保存音频</string>
+</resources>

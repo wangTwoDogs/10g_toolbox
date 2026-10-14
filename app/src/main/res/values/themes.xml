@@ -1,0 +1,17 @@
+<resources>
+    <style name="Theme.Toolbox" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/toolbox_primary</item>
+        <item name="colorOnPrimary">@color/toolbox_on_primary</item>
+        <item name="colorPrimaryContainer">@color/toolbox_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/toolbox_on_primary_container</item>
+        <item name="colorSecondary">@color/toolbox_secondary</item>
+        <item name="colorSecondaryContainer">@color/toolbox_secondary_container</item>
+        <item name="colorSurface">@color/toolbox_surface</item>
+        <item name="colorOnSurface">@color/toolbox_on_surface</item>
+        <item name="colorOnSurfaceVariant">@color/toolbox_on_surface_variant</item>
+        <item name="colorOutline">@color/toolbox_outline</item>
+        <item name="colorError">@color/toolbox_error</item>
+        <item name="android:windowBackground">@color/toolbox_surface</item>
+        <item name="android:fontFamily">sans</item>
+    </style>
+</resources>
