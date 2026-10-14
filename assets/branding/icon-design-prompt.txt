@@ -1,0 +1,23 @@
+应用：二狗叔叔的工具箱
+生成方式：内置 image_gen 工具
+交付文件：ergoushushu-toolbox-icon.png
+设计：亲切的卡通中年叔叔提着橙黄色工具箱，蓝天白云背景；正方形，不预裁圆角，无文字。
+
+初次生成提示词：
+Use case: stylized-concept
+Asset type: Android launcher app icon for the Chinese app 二狗叔叔的工具箱, a single finished square icon, 1024 x 1024.
+Primary request: 二狗叔叔提着工具箱，背景是蓝天白云。
+Scene/backdrop: bright clean blue sky filling the square edge to edge, with a few big soft white clouds. Simple airy background with clear separation from the main subject.
+Subject: one friendly cartoon Chinese middle-aged human uncle, not an animal, warm smiling face, slightly tousled short black hair, a little moustache and stubble, wearing a simple blue work shirt. He visibly carries one chunky orange-yellow toolbox by its top handle in one hand. Toolbox is a recognizable closed rectangular case with a dark handle and two simple clasps. Natural hand anatomy and believable carrying pose.
+Style/medium: polished playful 3D cartoon app mascot, rounded bold shapes, tasteful soft shading, clean surfaces and strong silhouette, friendly and capable personality.
+Composition/framing: single large centered character framed from head to mid-thigh, the face and carried toolbox form one balanced compact silhouette. Keep the head, face, carrying hand and complete toolbox comfortably within the central safe area with breathing room so they remain visible under circular and rounded-square launcher masks. The toolbox must be prominent and easy to identify at small icon size. Avoid tiny accessories and intricate details. The face, hand and toolbox are unobstructed.
+Lighting/mood: warm clear daylight, cheerful and approachable.
+Constraints: square finished artwork with an opaque full-bleed background, no pre-applied rounded corners, no outer frame, no inset icon mockup, no phone, no typography or letters, no watermark, no extra characters, no exposed scattered tools.
+
+最终构图调整提示词：
+Use case: precise-object-edit
+Asset type: final square Android app launcher icon for 二狗叔叔的工具箱.
+Edit target: the provided image of the smiling cartoon Chinese uncle in a blue work shirt carrying an orange-yellow toolbox against blue sky and white clouds.
+Primary request: change only composition and breathing room: make the whole character and toolbox about 20 percent smaller and arrange their combined silhouette more centrally, with generous sky around the full head, hands, and toolbox. Keep a half-body to mid-thigh portrait. All of the head including hair, carrying hand, handle and the entire toolbox must fit comfortably inside an imaginary centered circle about 86 percent of the canvas width; the bottom edge can end on the trousers. The box must remain prominent and visibly carried by the hand. Do not draw the imaginary circle or any border.
+Invariants: preserve this exact human character identity and face, age, hairstyle, moustache and stubble, cheerful smile, blue work shirt, yellow-orange toolbox with its dark handle and clasps, polished soft 3D cartoon rendering, blue sky and white cloud background. Maintain naturally connected hand and handle. Preserve the scene and design.
+Constraints: single square full-bleed opaque artwork, no rounded corners applied, no icon mockup, no text or logos or watermark, no added objects or characters.
