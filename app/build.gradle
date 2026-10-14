@@ -2,6 +2,15 @@ plugins {
     id 'com.android.application'
 }
 
+def releaseProperties = new Properties()
+def releasePropertiesFile = rootProject.file('signing.properties')
+if (releasePropertiesFile.exists()) {
+    releasePropertiesFile.withInputStream { releaseProperties.load(it) }
+}
+def hasReleaseSigning = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].every {
+    releaseProperties.getProperty(it)?.trim()
+}
+
 android {
     namespace 'com.ergoushushu.toolbox'
     compileSdk 35
@@ -20,9 +29,40 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile rootProject.file(releaseProperties.getProperty('storeFile'))
+                storePassword releaseProperties.getProperty('storePassword')
+                keyAlias releaseProperties.getProperty('keyAlias')
+                keyPassword releaseProperties.getProperty('keyPassword')
+                storeType 'PKCS12'
+            }
+        }
+    }
+
     buildTypes {
         release {
+            debuggable false
             minifyEnabled false
+            if (hasReleaseSigning) signingConfig signingConfigs.release
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == 'validateSigningRelease') {
+        doFirst {
+            if (!hasReleaseSigning) {
+                throw new GradleException('Release signing is missing. Configure local signing.properties before building a release.')
+            }
+        }
+    }
+    if (name == 'packageRelease') {
+        doFirst {
+            if (!hasReleaseSigning) {
+                throw new GradleException('Refusing to package an unsigned release. Configure local signing.properties.')
+            }
         }
     }
 }

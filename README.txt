@@ -10,10 +10,16 @@
 
 构建
 安装 JDK17、Android SDK35 与 Build Tools34；配置 JAVA_HOME 和 ANDROID_HOME。
-运行 .\gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
-或者使用 PowerShell7 运行 pwsh -File tools/build.ps1
-APK 构建完成后，工具脚本会复制到 dist/ErgoushushuToolbox-1.0.0-debug.apk。
-使用自己的 release 签名密钥配置正式发布版本；当前交付为可安装的 debug 版本。
+使用 PowerShell7 运行 pwsh -File tools/build.ps1，默认生成正式签名版本。
+APK 构建完成后，工具脚本会复制到 dist/ErgoushushuToolbox-1.0.0.apk，并生成 SHA256 校验文件。
+首次发布可运行 pwsh -File tools/init-signing.ps1 创建本机固定发布密钥。
+后续所有版本必须复用该密钥。保留 .signing/toolbox-release.p12 和 signing.properties 的安全备份。
+签名文件与密码不进入 Git，也不随 Release 上传。
+开发调试时显式添加 -DebugBuild；设备测试使用调试构建。
+
+下载与安装
+正式安装包从 https://github.com/wangTwoDogs/10g_toolbox/releases 下载。
+如已安装之前的 debug 测试版，需要先卸载再安装正式版；以后正式版本可使用相同签名更新。
 
 测试
 连接安卓手机（启用 USB 调试）或已启动的模拟器后：

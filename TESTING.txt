@@ -24,3 +24,11 @@ AndroidJUnitRunner：OK (8 tests)，0 失败，0 忽略。
 验证范围
 已实际运行 API35；其他支持的系统版本通过 API 静态检查，尚未逐个真机测试。
 设备未提供的解码/编码能力、DRM 及异常媒体会明确提示不支持。
+
+正式版本验证（2026-10-14）
+assembleRelease、testReleaseUnitTest（4 项）和 lintRelease 均通过。
+正式包使用固定 RSA3072 发布证书，apksigner v2 签名验证通过。
+证书主体：CN=Ergoushushu Toolbox, OU=Android, O=Ergoushushu, C=CN。
+正式 APK 不含 application-debuggable 标记，包名与版本仍为 com.ergoushushu.toolbox / 1.0.0。
+本机签名文件已由 .gitignore 排除，未进入 Git 或发布附件。
+构建脚本从 APK 元数据读取版本，正式导出文件名不带 debug，并生成 SHA256 校验文件。

@@ -16,6 +16,9 @@
 - 通过系统文件选择器选择视频及保存位置，媒体处理完全在手机本地完成。
 - 提取支持进度、取消、后台处理；失败或取消仅清理本次新建的输出文件。
 - 构建使用 JDK 17、Gradle 8.9、Android Gradle Plugin 8.7.3。
+- `tools/build.ps1` 默认生成正式签名版本；调试或设备测试需显式使用 `-DebugBuild` 或 `-DeviceTests`。
+- 发布密钥 `.signing/toolbox-release.p12` 与 `signing.properties` 仅保存在本机且不进入 Git；后续发布必须复用原密钥。
+- 对外安装包名称不带 `debug` 后缀，随正式 GitHub Release 发布。
 
 ## 版本管理
 

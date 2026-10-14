@@ -6,3 +6,8 @@ local.properties
 dist/
 test-output/
 *.hprof
+.signing/
+signing.properties
+*.keystore
+*.jks
+*.p12

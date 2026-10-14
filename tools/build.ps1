@@ -1,4 +1,4 @@
-param([switch]$DeviceTests, [string]$DeviceSerial, [switch]$UseSessionProxy)
+param([switch]$DebugBuild, [switch]$DeviceTests, [string]$DeviceSerial, [switch]$UseSessionProxy)
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -18,7 +18,15 @@ if (-not $env:JAVA_HOME -or -not (Test-Path -LiteralPath (Join-Path $env:JAVA_HO
 }
 if (-not $env:ANDROID_HOME) { throw '请配置 ANDROID_HOME，指向 Android SDK。' }
 
-$tasks = @(':app:assembleDebug', ':app:testDebugUnitTest', ':app:compileDebugAndroidTestJavaWithJavac', ':app:lintDebug')
+$variant = if ($DebugBuild -or $DeviceTests) { 'debug' } else { 'release' }
+if ($variant -eq 'release' -and -not (Test-Path -LiteralPath (Join-Path $projectRoot 'signing.properties'))) {
+    throw '正式构建需要本机 signing.properties。首个发布版本可先运行 tools/init-signing.ps1；后续版本必须复用原签名。'
+}
+$tasks = if ($variant -eq 'release') {
+    @(':app:assembleRelease', ':app:testReleaseUnitTest', ':app:lintRelease')
+} else {
+    @(':app:assembleDebug', ':app:testDebugUnitTest', ':app:compileDebugAndroidTestJavaWithJavac', ':app:lintDebug')
+}
 if ($DeviceTests) { $tasks += ':app:assembleDebugAndroidTest' }
 $proxyArguments = @()
 if ($UseSessionProxy) {
@@ -38,8 +46,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Gradle 构建失败，退出码 $LASTEXITCODE。" }
     $destinationDir = Join-Path $projectRoot 'dist'
     New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
-    $destination = Join-Path $destinationDir 'ErgoushushuToolbox-1.0.0-debug.apk'
-    Copy-Item -LiteralPath (Join-Path $projectRoot 'app\build\outputs\apk\debug\app-debug.apk') -Destination $destination -Force
+    $metadataFile = Join-Path $projectRoot "app\build\outputs\apk\$variant\output-metadata.json"
+    $metadata = Get-Content -LiteralPath $metadataFile -Raw | ConvertFrom-Json
+    $apkMetadata = @($metadata.elements)[0]
+    $version = $apkMetadata.versionName
+    $suffix = if ($variant -eq 'debug') { '-debug' } else { '' }
+    $destination = Join-Path $destinationDir "ErgoushushuToolbox-$version$suffix.apk"
+    $builtApk = Join-Path (Split-Path $metadataFile -Parent) $apkMetadata.outputFile
+    Copy-Item -LiteralPath $builtApk -Destination $destination -Force
+    $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText("$destination.sha256", "$hash  $([IO.Path]::GetFileName($destination))`n", [Text.UTF8Encoding]::new($false))
     Write-Output "APK: $destination"
     if ($DeviceTests) {
         $adb = Join-Path $env:ANDROID_HOME 'platform-tools\adb.exe'
