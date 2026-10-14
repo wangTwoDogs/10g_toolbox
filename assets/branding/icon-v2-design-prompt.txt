@@ -1,0 +1,16 @@
+应用：二狗叔叔的工具箱
+当前图标：ergoushushu-toolbox-icon-v2.png（512×512 PNG）
+桌面尺寸预览：previews/icon-v2-48.png、previews/icon-v2-64.png
+原始素材：ergoushushu-toolbox-icon-v2-master.png
+图像内容生成方式：内置 image_gen；标准尺寸用 System.Drawing 等比导出。
+设计：大头像、短半身、明显的提箱动作、橙黄色工具箱、蓝天白云；粗轮廓与简单色块适合小尺寸。
+验收：检查了 48×48 原尺寸下的人物、工具箱和握柄关系。
+
+最终生成提示词：
+Use case: style-transfer
+Asset type: a real Android launcher app icon, designed to read clearly at 48 pixels, for 二狗叔叔的工具箱.
+Edit target/reference: the supplied friendly Chinese uncle carrying a yellow-orange toolbox against blue sky. Keep his human identity, warm smile, short black hair, moustache, blue shirt, and orange toolbox concept.
+Primary request: completely redesign the drawing and framing into a compact SIMPLE ICON rather than a detailed full-body illustration. Use bold flat 2D cartoon shapes, clean thick dark navy outlines, only two or three solid tones per material, almost no fine texture. The recognizable smiling uncle's large head occupies the upper center. Show only head, shoulders and a short torso, no legs or trousers. A very prominent orange-yellow rectangular toolbox with a chunky dark top handle occupies the lower center foreground. One bent arm naturally lifts the toolbox by its handle, with a simplified hand visibly wrapped around the handle. Show an unmistakable carrying gesture; do not hide the handle behind the hand or make him hug the box. The toolbox and face should be equally easy to identify in a thumbnail.
+Composition: balanced compact centered silhouette: large face in upper half, toolbox in lower third, a small amount of blue shirt joining them. Important face, hair, carrying hand and entire toolbox stay comfortably inside a central circular safe area. Fill about 70 percent of canvas with the main emblem, keeping a modest sky margin. Avoid a huge empty sky above the subject. Toolbox width about half the canvas; head width about two-fifths. Design like a cheerful readable app mascot logo, not a poster or portrait.
+Background: flat bright sky blue, exactly two small simple white cartoon clouds flanking the head; avoid realistic cloud texture. Full-bleed opaque square background.
+Constraints: preserve a friendly middle-aged Chinese human uncle, no dog character, no tiny stubble dots, no clothing texture, no individual hair strands, no tiny hardware, no photorealism, no 3D rendering, no full-body scene, no landscape, no typography, no logo text, no watermark, no rounded-square border or phone mockup, no additional characters.
