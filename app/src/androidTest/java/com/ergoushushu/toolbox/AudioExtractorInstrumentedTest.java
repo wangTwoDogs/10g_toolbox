@@ -43,6 +43,22 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Runs against real Android extractors/codecs; fixtures contain no user media. */
 @RunWith(AndroidJUnit4.class)
 public final class AudioExtractorInstrumentedTest {
+    @Test(timeout = 360_000)
+    public void longStereoWavBenchmark() throws Exception {
+        File source = file("long-stereo.wav");
+        File output = file("long-stereo.m4a");
+        int seconds = Integer.parseInt(InstrumentationRegistry.getArguments().getString("benchmarkSeconds", "120"));
+        assertTrue(seconds > 0 && seconds <= 6000);
+        MediaFixtures.writeLongPcmWav(source, seconds);
+        long started = SystemClock.elapsedRealtime();
+        AudioExtractor.Result result = AudioExtractor.compress(context, Uri.fromFile(source),
+                Uri.fromFile(output), new CancellationSignal(), null);
+        long elapsed = SystemClock.elapsedRealtime() - started;
+        android.util.Log.i("ToolboxBenchmark", seconds + "s stereo WAV: " + elapsed + "ms, "
+                + source.length() + " -> " + output.length() + ", rate=" + result.sampleRate);
+        assertTrue("Duration must not be truncated", Math.abs(result.durationUs - seconds * 1_000_000L) < 100_000);
+        assertTrue(output.length() < source.length() / 10);
+    }
     private Context context;
     private File fixtureDirectory;
     private final List<File> createdFiles = new ArrayList<>();
@@ -482,7 +498,7 @@ public final class AudioExtractorInstrumentedTest {
                 }
             }
             // Allow encoder delay/padding, while catching empty or severely truncated output.
-            assertTrue("Too little decoded audio", decodedBytes >= MediaFixtures.SAMPLE_RATE / 2);
+            assertTrue("Too little decoded audio", decodedBytes >= format.getInteger(MediaFormat.KEY_SAMPLE_RATE) / 2);
             return audible;
         } finally {
             if (decoder != null) {

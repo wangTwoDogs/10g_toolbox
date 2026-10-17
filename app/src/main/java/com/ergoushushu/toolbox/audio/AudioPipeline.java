@@ -110,6 +110,9 @@ final class AudioPipeline {
         if (MediaFormat.MIMETYPE_AUDIO_RAW.equals(sourceMime)) {
             // For raw tracks this key describes the input too; changing it would corrupt PCM.
             requirePcm16(sourceFormat);
+            // WAV already contains PCM. A raw MediaCodec decoder adds another buffer queue
+            // and vendor-dependent passthrough behavior without doing any decoding.
+            return encodePcm(extractor, sourceFormat, output, cancellation, progress, compress);
         } else {
             sourceFormat.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT);
         }
@@ -123,6 +126,135 @@ final class AudioPipeline {
         }
     }
 
+    private static Stats encodePcm(MediaExtractor extractor, MediaFormat source, File output,
+                                   CancellationSignal cancellation, AudioExtractor.Progress progress,
+                                   boolean compress) throws IOException {
+        int sourceRate = requiredPositive(source, MediaFormat.KEY_SAMPLE_RATE);
+        int sourceChannels = requiredPositive(source, MediaFormat.KEY_CHANNEL_COUNT);
+        if (sourceChannels > 8) throw new IOException("暂不支持超过 8 个声道的录音。");
+        int channels = compress ? 1 : sourceChannels;
+        VoicePcm converter = compress ? new VoicePcm(sourceRate, sourceChannels) : null;
+        int rate = converter == null ? sourceRate : converter.outputRate;
+        int frameBytes = channels * 2;
+        int capacity = Math.max(DEFAULT_SAMPLE_BUFFER,
+                AudioExtractor.getInt(source, MediaFormat.KEY_MAX_INPUT_SIZE, 0));
+        if (capacity > MAX_SAMPLE_BUFFER) throw sampleTooLarge();
+        ByteBuffer raw = ByteBuffer.allocateDirect(capacity);
+        ByteBuffer pending = null;
+        long originUs = -1, pendingUs = 0, inputEndUs = 0, outputOriginUs = Long.MIN_VALUE;
+        int consumed = 0;
+        boolean sourceDone = false, inputDone = false, outputDone = false;
+        long packets = 0, lastOutputUs = -1, lastActivity = SystemClock.elapsedRealtime();
+        try (CodecHandle owner = createEncoder(rate, channels, compress);
+             MuxerOutput muxer = new MuxerOutput(output)) {
+            MediaCodec encoder = owner.codec;
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            while (!outputDone) {
+                AudioExtractor.checkCanceled(cancellation);
+                boolean moved = false;
+                // Drain/feed in batches, rather than sleeping once for every tiny PCM packet.
+                for (int attempt = 0; attempt < 32; attempt++) {
+                    int index = encoder.dequeueOutputBuffer(info, 0);
+                    if (index == MediaCodec.INFO_TRY_AGAIN_LATER) break;
+                    moved = true;
+                    if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        if (muxer.started) throw new IOException("编码过程中音频格式发生变化。");
+                        muxer.start(encoder.getOutputFormat());
+                    } else if (index >= 0) {
+                        outputDone = (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
+                        try {
+                            if (info.size > 0 && (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+                                if (!muxer.started) throw new IOException("AAC 编码器未提供音轨信息。");
+                                ByteBuffer bytes = requireBuffer(encoder.getOutputBuffer(index));
+                                validateRange(bytes, info.offset, info.size);
+                                if (outputOriginUs == Long.MIN_VALUE) outputOriginUs = info.presentationTimeUs;
+                                long timeUs = info.presentationTimeUs - outputOriginUs;
+                                if (timeUs < 0 || timeUs < lastOutputUs) throw invalidTimestamp();
+                                bytes.position(info.offset);
+                                bytes.limit(info.offset + info.size);
+                                info.set(info.offset, info.size, timeUs,
+                                        info.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME);
+                                muxer.write(bytes, info);
+                                lastOutputUs = timeUs;
+                                packets++;
+                                progress.audio(timeUs);
+                            }
+                        } finally { encoder.releaseOutputBuffer(index, false); }
+                    }
+                    if (outputDone) break;
+                }
+                if (outputDone) break;
+                for (int attempt = 0; attempt < 16 && !inputDone; attempt++) {
+                    AudioExtractor.checkCanceled(cancellation);
+                    if (pending == null && !sourceDone) {
+                        if (extractor.getSampleTrackIndex() < 0) sourceDone = true;
+                        else {
+                            requireClearSample(extractor.getSampleFlags());
+                            if (Build.VERSION.SDK_INT >= 28) {
+                                long size = extractor.getSampleSize();
+                                if (size > MAX_SAMPLE_BUFFER) throw sampleTooLarge();
+                                if (size > raw.capacity()) raw = ByteBuffer.allocateDirect((int) size);
+                            }
+                            raw.clear();
+                            int size = extractor.readSampleData(raw, 0);
+                            if (size < 0) sourceDone = true;
+                            else {
+                                if (size > raw.capacity()) throw sampleTooLarge();
+                                if (size % (sourceChannels * 2) != 0) throw new IOException("录音 PCM 数据不完整。");
+                                long time = extractor.getSampleTime();
+                                if (time < 0) throw invalidTimestamp();
+                                if (originUs < 0) originUs = time;
+                                pendingUs = converter == null ? time - originUs
+                                        : converter.framesWritten() * 1_000_000L / rate;
+                                if (pendingUs < 0) throw invalidTimestamp();
+                                consumed = 0;
+                                raw.position(0);
+                                raw.limit(size);
+                                pending = converter == null ? raw.slice() : converter.convert(raw.slice());
+                                extractor.advance();
+                                if (!pending.hasRemaining()) pending = null;
+                            }
+                        }
+                    }
+                    if (pending == null && !sourceDone) continue;
+                    int index = encoder.dequeueInputBuffer(moved ? 0 : 1_000);
+                    if (index < 0) break;
+                    if (pending == null) {
+                        encoder.queueInputBuffer(index, 0, 0, inputEndUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                        inputDone = true;
+                    } else {
+                        ByteBuffer input = requireBuffer(encoder.getInputBuffer(index));
+                        input.clear();
+                        int size = Math.min(input.remaining(), pending.remaining());
+                        size -= size % frameBytes;
+                        if (size <= 0) throw new IOException("手机 AAC 编码器的缓冲区太小。");
+                        long timeUs = pendingUs + consumed / frameBytes * 1_000_000L / rate;
+                        int limit = pending.limit();
+                        pending.limit(pending.position() + size);
+                        input.put(pending);
+                        pending.limit(limit);
+                        encoder.queueInputBuffer(index, 0, size, timeUs, 0);
+                        consumed += size;
+                        inputEndUs = pendingUs + consumed / frameBytes * 1_000_000L / rate;
+                        if (!pending.hasRemaining()) pending = null;
+                    }
+                    moved = true;
+                }
+                if (moved) lastActivity = SystemClock.elapsedRealtime();
+                else {
+                    if (SystemClock.elapsedRealtime() - lastActivity > STALL_TIMEOUT_MS) {
+                        throw new IOException("AAC 编码器没有响应（" + encoder.getName() + "）。请重试这份录音。");
+                    }
+                    Thread.yield();
+                }
+            }
+            if (packets == 0) throw new IOException("录音没有可编码的音频数据。");
+            long duration = Math.max(inputEndUs, lastOutputUs + 1_024_000_000L / rate);
+            muxer.finish(duration);
+            return new Stats(duration, rate, channels);
+        }
+    }
+
     private static Stats pump(MediaExtractor extractor, MediaCodec decoder, MuxerOutput muxer,
                               CancellationSignal cancellation, AudioExtractor.Progress progress,
                               boolean compress)
@@ -133,6 +265,8 @@ final class AudioPipeline {
         int sampleRate = 0;
         int channels = 0;
         int decodedChannels = 0;
+        int decodedRate = 0;
+        VoicePcm converter = null;
         int frameBytes = 0;
         int pendingDecoderIndex = -1;
         ByteBuffer pendingPcm = null;
@@ -245,14 +379,16 @@ final class AudioPipeline {
                         int actualChannels = requiredPositive(pcmFormat, MediaFormat.KEY_CHANNEL_COUNT);
                         requirePcm16(pcmFormat);
                         if (encoder == null) {
-                            sampleRate = actualRate;
+                            decodedRate = actualRate;
                             decodedChannels = actualChannels;
                             if (decodedChannels > 8) throw new IOException("暂不支持超过 8 个声道的录音。");
                             channels = compress ? 1 : actualChannels;
+                            converter = compress ? new VoicePcm(actualRate, actualChannels) : null;
+                            sampleRate = converter == null ? actualRate : converter.outputRate;
                             frameBytes = channels * 2;
                             encoderOwner.handle = createEncoder(sampleRate, channels, compress);
                             encoder = encoderOwner.handle.codec;
-                        } else if (actualRate != sampleRate || actualChannels != decodedChannels) {
+                        } else if (actualRate != decodedRate || actualChannels != decodedChannels) {
                             throw new IOException("这个文件的音轨在中途改变了采样率或声道，暂不支持。" );
                         }
                         moved = true;
@@ -273,7 +409,13 @@ final class AudioPipeline {
                             validateRange(pcm, decodedInfo.offset, decodedInfo.size);
                             pcm.position(decodedInfo.offset);
                             pcm.limit(decodedInfo.offset + decodedInfo.size);
-                            pendingPcm = compress ? Pcm16.mono(pcm.slice(), decodedChannels) : pcm.slice();
+                            pendingPcm = converter == null ? pcm.slice() : converter.convert(pcm.slice());
+                            if (!pendingPcm.hasRemaining()) {
+                                decoder.releaseOutputBuffer(index, false);
+                                pendingPcm = null;
+                                decoderDone = eos;
+                                continue;
+                            }
                             pendingDecoderIndex = index;
                             pendingBytesConsumed = 0;
                             pendingEos = eos;
@@ -350,6 +492,25 @@ final class AudioPipeline {
         format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024);
         format.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT);
         String codecName = new MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(format);
+        if (compress) {
+            // Prefer the platform AAC software encoder for offline work: vendor encoders
+            // may be designed for real-time capture and can stall with offline buffer queues.
+            for (MediaCodecInfo candidate : new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos()) {
+                if (!candidate.isEncoder()) continue;
+                String name = candidate.getName();
+                boolean software = Build.VERSION.SDK_INT >= 29 ? candidate.isSoftwareOnly()
+                        : name.startsWith("OMX.google.") || name.startsWith("c2.android.");
+                if (!software) continue;
+                for (String type : candidate.getSupportedTypes()) {
+                    if (type.equalsIgnoreCase(MediaFormat.MIMETYPE_AUDIO_AAC)
+                            && candidate.getCapabilitiesForType(type).isFormatSupported(format)) {
+                        codecName = name;
+                        break;
+                    }
+                }
+                if (name.equals(codecName)) break;
+            }
+        }
         if (codecName == null) {
             throw new IOException("当前手机不支持把这个音轨的采样率和声道编码为 AAC。" );
         }

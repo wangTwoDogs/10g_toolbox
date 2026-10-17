@@ -7,7 +7,7 @@ import android.provider.DocumentsContract;
 final class OutputFiles {
     private OutputFiles() { }
 
-    /** Only call for the new URI returned by our ACTION_CREATE_DOCUMENT request. */
+    /** Only call for new documents created by this task, never an input or a pre-existing file. */
     static boolean deleteCreatedOutput(Context context, Uri createdOutput) {
         if (createdOutput == null) return true;
         try {

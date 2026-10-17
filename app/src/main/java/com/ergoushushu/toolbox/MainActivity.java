@@ -92,7 +92,7 @@ public final class MainActivity extends AppCompatActivity {
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
-        compressionMode = getPreferences(MODE_PRIVATE).getBoolean("compressionMode", false);
+        compressionMode = false;
         if (savedInstanceState != null) {
             compressionMode = savedInstanceState.getBoolean("compressionMode", compressionMode);
             String input = savedInstanceState.getString("selectedVideo");
@@ -109,6 +109,13 @@ public final class MainActivity extends AppCompatActivity {
         tools.check(compressionMode ? R.id.tool_compress : R.id.tool_extract);
         ExtractionStore.observe().observe(this, this::render);
         if (selectedVideo != null) inspectSelectedVideo();
+        if (savedInstanceState == null && !getIntent().getBooleanExtra("showVideo", false)
+                && ExtractionStore.current().phase == ExtractionStore.Phase.IDLE
+                && (getPreferences(MODE_PRIVATE).getBoolean("compressionMode", false)
+                || "compression".equals(getSharedPreferences("toolbox", MODE_PRIVATE).getString("lastTool", "video")))) {
+            getPreferences(MODE_PRIVATE).edit().putBoolean("compressionMode", false).apply();
+            startActivity(new Intent(this, CompressionActivity.class));
+        }
     }
 
     private void createScreen() {
@@ -263,6 +270,11 @@ public final class MainActivity extends AppCompatActivity {
     private void switchTool(boolean compress) {
         if (compressionMode == compress) return;
         if (ExtractionStore.current().phase == ExtractionStore.Phase.WORKING || awaitingOutput) return;
+        if (compress) {
+            tools.check(R.id.tool_extract);
+            startActivity(new Intent(this, CompressionActivity.class));
+            return;
+        }
         compressionMode = compress;
         getPreferences(MODE_PRIVATE).edit().putBoolean("compressionMode", compress).apply();
         ++inspectGeneration;
@@ -296,6 +308,7 @@ public final class MainActivity extends AppCompatActivity {
 
     private void chooseOutput() {
         if (selectedVideo == null || ExtractionStore.current().phase == ExtractionStore.Phase.WORKING) return;
+        if (CompressionHistory.get(this).hasWork()) { feedback("请先等待录音队列处理结束，或停止队列。"); return; }
         pendingChooseOutput = true;
         if (!inputReady) return;
         try {

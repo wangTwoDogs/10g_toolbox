@@ -24,6 +24,22 @@ final class MediaFixtures {
 
     private MediaFixtures() { }
 
+    static void writeLongPcmWav(File destination, int seconds) throws IOException {
+        int dataBytes = SAMPLE_RATE * seconds * 4;
+        ByteBuffer header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);
+        header.put(new byte[]{'R','I','F','F'}).putInt(36 + dataBytes);
+        header.put(new byte[]{'W','A','V','E','f','m','t',' '}).putInt(16);
+        header.putShort((short) 1).putShort((short) 2).putInt(SAMPLE_RATE);
+        header.putInt(SAMPLE_RATE * 4).putShort((short) 4).putShort((short) 16);
+        header.put(new byte[]{'d','a','t','a'}).putInt(dataBytes);
+        ByteBuffer block = ByteBuffer.allocate(SAMPLE_RATE * 4).order(ByteOrder.LITTLE_ENDIAN);
+        for (int index = 0; index < SAMPLE_RATE; index++) block.putShort(tone(index)).putShort(tone(index));
+        try (FileOutputStream stream = new FileOutputStream(destination)) {
+            stream.write(header.array());
+            for (int second = 0; second < seconds; second++) stream.write(block.array());
+        }
+    }
+
     static void writeAac(File destination) throws IOException {
         writeAac(destination, 96_000);
     }

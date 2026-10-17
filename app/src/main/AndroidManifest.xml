@@ -19,6 +19,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".CompressionActivity" android:exported="false" />
+        <service android:name=".CompressionService" android:exported="false"
+            android:foregroundServiceType="dataSync|mediaProcessing" />
         <service
             android:name=".ExtractionService"
             android:exported="false"

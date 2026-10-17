@@ -1,4 +1,7 @@
 <resources>
+    <string name="recordings_selected">已选择 %1$d 份录音</string>
+    <string name="queue_summary">等待 %1$d · 处理中 %2$d\n完成 %3$d · 未完成 %4$d</string>
+    <string name="share_selected">分享已选（%1$d）</string>
     <string name="app_name">二狗叔叔的工具箱</string>
     <string name="notification_channel">音频处理</string>
     <string name="notification_title">正在提取音频</string>

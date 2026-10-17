@@ -85,18 +85,24 @@ public final class AudioExtractor {
     public static Result extract(Context context, Uri input, Uri output,
                                  CancellationSignal cancellation, Listener listener)
             throws IOException {
-        return process(context, input, output, cancellation, listener, false);
+        return process(context, input, output, cancellation, listener, false, context.getCacheDir());
     }
 
     /** Re-encodes even AAC inputs as 32 kbps mono AAC; never replaces the original recording. */
     public static Result compress(Context context, Uri input, Uri output,
                                   CancellationSignal cancellation, Listener listener) throws IOException {
-        return process(context, input, output, cancellation, listener, true);
+        return compress(context, input, output, cancellation, listener, context.getCacheDir());
+    }
+
+    /** A job-owned cache directory permits precise cleanup after an interrupted batch. */
+    public static Result compress(Context context, Uri input, Uri output, CancellationSignal cancellation,
+                                  Listener listener, File workingDirectory) throws IOException {
+        return process(context, input, output, cancellation, listener, true, workingDirectory);
     }
 
     private static Result process(Context context, Uri input, Uri output,
                                   CancellationSignal cancellation, Listener listener,
-                                  boolean compress) throws IOException {
+                                  boolean compress, File workingDirectory) throws IOException {
         if (input == null || output == null || input.equals(output)) {
             throw new IOException("请选择源文件，并另存为一个新的音频文件。" );
         }
@@ -110,7 +116,7 @@ public final class AudioExtractor {
             extractor.selectTrack(track.index);
             Progress progress = new Progress(source.durationUs, listener);
             progress.initial();
-            try (TemporaryFile temporary = new TemporaryFile(context.getCacheDir())) {
+            try (TemporaryFile temporary = new TemporaryFile(workingDirectory)) {
                 AudioPipeline.Stats stats = (compress || source.willTranscode)
                         ? AudioPipeline.transcode(extractor, track.format, temporary.file,
                                 cancellation, progress, compress)
@@ -162,7 +168,10 @@ public final class AudioExtractor {
         try (AssetFileDescriptor descriptor = context.getContentResolver()
                 .openAssetFileDescriptor(input, "r", cancellation)) {
             if (descriptor == null) throw new IOException("无法打开所选文件。" );
-            extractor.setDataSource(descriptor);
+            try { extractor.setDataSource(descriptor); }
+            catch (IOException error) {
+                throw new IOException("无法解析这份音频，文件可能损坏或格式不受手机支持。", error);
+            }
         }
     }
 
