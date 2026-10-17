@@ -29,6 +29,7 @@ public final class ExtractionService extends Service {
     public static final String EXTRA_INPUT = "input";
     public static final String EXTRA_OUTPUT = "output";
     public static final String EXTRA_NAME = "name";
+    public static final String EXTRA_COMPRESS = "compress";
     private static final String CHANNEL = "audio_extraction";
     private static final int NOTIFICATION_ID = 10;
 
@@ -40,6 +41,8 @@ public final class ExtractionService extends Service {
     private int lastProgress = Integer.MIN_VALUE;
     private volatile String outputName;
     private Uri output;
+    private boolean compress;
+    private long inputBytes = -1;
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
@@ -66,6 +69,7 @@ public final class ExtractionService extends Service {
             return START_NOT_STICKY;
         }
         output = requestedOutput;
+        compress = intent.getBooleanExtra(EXTRA_COMPRESS, false);
         outputName = intent.getStringExtra(EXTRA_NAME);
         if (outputName == null) outputName = "提取的音频.m4a";
         if (input == null || output == null || input.equals(output)) {
@@ -85,7 +89,7 @@ public final class ExtractionService extends Service {
                 startForeground(NOTIFICATION_ID, notification);
             }
         } catch (RuntimeException error) {
-            finish(ExtractionStore.Phase.FAILED, "系统暂时不允许开始提取，请稍后重试。", 0, 0, true);
+            finish(ExtractionStore.Phase.FAILED, "系统暂时不允许开始处理，请稍后重试。", 0, 0, true);
             return START_NOT_STICKY;
         }
         running = true;
@@ -102,18 +106,21 @@ public final class ExtractionService extends Service {
                         outputName = cursor.getString(0);
                     }
                 } catch (RuntimeException ignored) { /* Keep the suggested filename if unavailable. */ }
-                AudioExtractor.Result result = AudioExtractor.extract(getApplicationContext(),
-                        input, output, cancellation, percent -> main.post(() -> publishProgress(percent)));
+                AudioExtractor.Listener listener = percent -> main.post(() -> publishProgress(percent));
+                AudioExtractor.Result result = compress
+                        ? AudioExtractor.compress(getApplicationContext(), input, output, cancellation, listener)
+                        : AudioExtractor.extract(getApplicationContext(), input, output, cancellation, listener);
+                inputBytes = result.inputBytes;
                 main.post(() -> finish(ExtractionStore.Phase.SUCCESS, "音频已保存",
                         result.durationUs, result.outputBytes, false));
             } catch (OperationCanceledException error) {
                 boolean deleted = OutputFiles.deleteCreatedOutput(this, output);
                 main.post(() -> finish(ExtractionStore.Phase.CANCELLED,
-                        "已取消提取" + cleanupWarning(deleted), 0, 0, false));
+                        "已取消" + (compress ? "压缩" : "提取") + cleanupWarning(deleted), 0, 0, false));
             } catch (Exception error) {
                 boolean deleted = OutputFiles.deleteCreatedOutput(this, output);
                 String message = error.getMessage();
-                if (message == null || message.trim().isEmpty()) message = "无法处理这个视频，请换一个文件重试。";
+                if (message == null || message.trim().isEmpty()) message = "无法处理这个文件，请换一个文件重试。";
                 final String finalMessage = message + cleanupWarning(deleted);
                 main.post(() -> finish(ExtractionStore.Phase.FAILED, finalMessage, 0, 0, false));
             }
@@ -129,7 +136,8 @@ public final class ExtractionService extends Service {
         if (!running || percent == lastProgress) return;
         lastProgress = percent;
         ExtractionStore.update(new ExtractionStore.State(ExtractionStore.Phase.WORKING,
-                percent, "正在提取音频", outputName, output, 0, 0));
+                percent, compress ? "正在压缩录音" : "正在提取音频", outputName, output, 0, 0,
+                compress, inputBytes));
         getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification(percent));
     }
 
@@ -141,7 +149,7 @@ public final class ExtractionService extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_audio)
-                .setContentTitle(getString(R.string.notification_title))
+                .setContentTitle(compress ? "正在压缩录音" : getString(R.string.notification_title))
                 .setContentText(percent < 0 ? outputName : outputName + " · " + percent + "%")
                 .setContentIntent(open)
                 .setOngoing(true)
@@ -157,7 +165,7 @@ public final class ExtractionService extends Service {
         running = false;
         ExtractionStore.update(new ExtractionStore.State(phase,
                 phase == ExtractionStore.Phase.SUCCESS ? 100 : 0, message,
-                outputName == null ? "" : outputName, output, durationUs, bytes));
+                outputName == null ? "" : outputName, output, durationUs, bytes, compress, inputBytes));
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }

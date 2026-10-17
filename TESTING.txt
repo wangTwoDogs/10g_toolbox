@@ -31,4 +31,20 @@ assembleRelease、testReleaseUnitTest（4 项）和 lintRelease 均通过。
 证书主体：CN=Ergoushushu Toolbox, OU=Android, O=Ergoushushu, C=CN。
 正式 APK 不含 application-debuggable 标记，包名与版本仍为 com.ergoushushu.toolbox / 1.0.0。
 本机签名文件已由 .gitignore 排除，未进入 Git 或发布附件。
+
+录音压缩验证（2026-10-17，中国时间）
+版本：1.1.0（versionCode 2）。
+调试与正式构建、各 8 项 JVM 单元测试、lintDebug / lintRelease 均通过。
+Lint 为 0 错误、4 项既有警告（备份配置、资源目录和图标 monochrome）。
+Android 15 / API35 既有模拟器：AndroidJUnitRunner OK (13 tests)。
+新增验证：立体声 WAV 合并单声道后小于原文件的三分之一，右声道音频保留且实际解码非静音，
+源文件字节保持、时长误差低于 100ms、已有 AAC 重新编码变小、已很小的录音不写入更大结果、
+处理中取消清理临时文件、压缩前台服务及 Activity 重建后工具选项恢复。
+修复测试发现的旧 View 状态覆盖当前工具选项的问题，复测通过。
+已检查录音压缩浅色、深色实际界面；AndroidRuntime 无错误日志。
+正式 APK 的 v2 签名验证通过，证书 SHA256 与 1.0.0 一致，无 debuggable 标记。
+交付：dist/ErgoushushuToolbox-1.1.0.apk 及对应 SHA256 校验文件。
+测试素材均在本次独有目录登记并清理，已确认应用 cache 为空；界面检查临时 XML 已删除。
+本次启动的模拟器、ADB、Gradle daemon 已关闭，相关本地监听端口已确认退出。
+未上传用户音频；未进行 MiniMax 接入或转写测试。未使用真实人声样本评估主观音质。
 构建脚本从 APK 元数据读取版本，正式导出文件名不带 debug，并生成 SHA256 校验文件。

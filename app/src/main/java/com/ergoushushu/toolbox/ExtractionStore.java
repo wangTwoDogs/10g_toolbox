@@ -17,9 +17,16 @@ public final class ExtractionStore {
         public final Uri output;
         public final long durationUs;
         public final long outputBytes;
+        public final boolean compressed;
+        public final long inputBytes;
 
         State(Phase phase, int progress, String message, String fileName, Uri output,
                 long durationUs, long outputBytes) {
+            this(phase, progress, message, fileName, output, durationUs, outputBytes, false, -1);
+        }
+
+        State(Phase phase, int progress, String message, String fileName, Uri output,
+                long durationUs, long outputBytes, boolean compressed, long inputBytes) {
             this.phase = phase;
             this.progress = progress;
             this.message = message;
@@ -27,6 +34,8 @@ public final class ExtractionStore {
             this.output = output;
             this.durationUs = durationUs;
             this.outputBytes = outputBytes;
+            this.compressed = compressed;
+            this.inputBytes = inputBytes;
         }
     }
 

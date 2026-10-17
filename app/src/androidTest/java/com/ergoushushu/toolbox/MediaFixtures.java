@@ -25,9 +25,13 @@ final class MediaFixtures {
     private MediaFixtures() { }
 
     static void writeAac(File destination) throws IOException {
+        writeAac(destination, 96_000);
+    }
+
+    static void writeAac(File destination, int bitRate) throws IOException {
         MediaFormat format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, SAMPLE_RATE, 1);
         format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, 96_000);
+        format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate);
         format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, SAMPLES_PER_FRAME * 2);
         encodeMp4(destination, format, AUDIO_FRAMES, SAMPLES_PER_FRAME * 2,
                 SAMPLES_PER_FRAME * 1_000_000L / SAMPLE_RATE,
@@ -150,22 +154,31 @@ final class MediaFixtures {
     }
 
     static void writePcmWav(File destination) throws IOException {
+        writePcmWav(destination, 1);
+    }
+
+    static void writePcmWav(File destination, int channels) throws IOException {
         int samples = AUDIO_FRAMES * SAMPLES_PER_FRAME;
-        int dataBytes = samples * 2;
+        int dataBytes = samples * 2 * channels;
         ByteBuffer data = ByteBuffer.allocate(44 + dataBytes).order(ByteOrder.LITTLE_ENDIAN);
         data.put(new byte[] { 'R', 'I', 'F', 'F' });
         data.putInt(36 + dataBytes);
         data.put(new byte[] { 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ' });
         data.putInt(16);
         data.putShort((short) 1); // PCM
-        data.putShort((short) 1); // mono
+        data.putShort((short) channels);
         data.putInt(SAMPLE_RATE);
-        data.putInt(SAMPLE_RATE * 2);
-        data.putShort((short) 2);
+        data.putInt(SAMPLE_RATE * 2 * channels);
+        data.putShort((short) (2 * channels));
         data.putShort((short) 16);
         data.put(new byte[] { 'd', 'a', 't', 'a' });
         data.putInt(dataBytes);
-        for (int sample = 0; sample < samples; sample++) data.putShort(tone(sample));
+        for (int sample = 0; sample < samples; sample++) {
+            for (int channel = 0; channel < channels; channel++) {
+                // Stereo has speech only on the right: blindly keeping the left must fail QA.
+                data.putShort(channels == 2 && channel == 0 ? (short) 0 : tone(sample));
+            }
+        }
         try (FileOutputStream stream = new FileOutputStream(destination)) {
             stream.write(data.array());
         }

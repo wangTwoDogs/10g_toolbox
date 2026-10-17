@@ -15,6 +15,9 @@ public final class FileNamesTest {
         assertEquals("1:01:01", FileNames.duration(3_661_000_000L));
         assertEquals("时长未知", FileNames.duration(-1));
     }
+    @Test public void compressedNameKeepsTheOriginalDistinct() {
+        assertEquals("会议录音-压缩.m4a", FileNames.compressedName("会议录音.m4a"));
+    }
     @Test public void limitsVeryLongNamesWithoutSplittingEmoji() {
         String name = "😀".repeat(100) + ".mp4";
         String output = FileNames.audioName(name);

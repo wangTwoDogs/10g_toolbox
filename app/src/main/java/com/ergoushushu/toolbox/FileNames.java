@@ -23,6 +23,11 @@ final class FileNames {
                 : String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60);
     }
 
+    static String compressedName(String sourceName) {
+        String audio = audioName(sourceName);
+        return audio.substring(0, audio.length() - 4) + "-压缩.m4a";
+    }
+
     static String size(long bytes) {
         if (bytes < 0) return "";
         if (bytes < 1024 * 1024) return String.format(Locale.ROOT, "%.0f KB", bytes / 1024d);

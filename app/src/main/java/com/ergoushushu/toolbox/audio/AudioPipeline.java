@@ -90,7 +90,7 @@ final class AudioPipeline {
                 }
                 if (!extractor.advance()) break;
             }
-            if (samples == 0) throw new IOException("这个视频的音轨没有可提取的音频数据。" );
+            if (samples == 0) throw new IOException("这个文件的音轨没有可提取的音频数据。" );
             long durationUs = lastUs + Math.max(1, lastStepUs);
             muxer.finish(durationUs);
             return new Stats(durationUs, sampleRate, channels);
@@ -100,6 +100,12 @@ final class AudioPipeline {
     static Stats transcode(MediaExtractor extractor, MediaFormat sourceFormat, File output,
                            CancellationSignal cancellation, AudioExtractor.Progress progress)
             throws IOException {
+        return transcode(extractor, sourceFormat, output, cancellation, progress, false);
+    }
+
+    static Stats transcode(MediaExtractor extractor, MediaFormat sourceFormat, File output,
+                           CancellationSignal cancellation, AudioExtractor.Progress progress,
+                           boolean compress) throws IOException {
         String sourceMime = sourceFormat.getString(MediaFormat.KEY_MIME);
         if (MediaFormat.MIMETYPE_AUDIO_RAW.equals(sourceMime)) {
             // For raw tracks this key describes the input too; changing it would corrupt PCM.
@@ -113,18 +119,20 @@ final class AudioPipeline {
             MediaCodec decoder = decoderHandle.codec;
             decoder.configure(sourceFormat, null, null, 0);
             decoderHandle.start();
-            return pump(extractor, decoder, muxer, cancellation, progress);
+            return pump(extractor, decoder, muxer, cancellation, progress, compress);
         }
     }
 
     private static Stats pump(MediaExtractor extractor, MediaCodec decoder, MuxerOutput muxer,
-                              CancellationSignal cancellation, AudioExtractor.Progress progress)
+                              CancellationSignal cancellation, AudioExtractor.Progress progress,
+                              boolean compress)
             throws IOException {
         MediaCodec encoder = null;
         MediaCodec.BufferInfo decodedInfo = new MediaCodec.BufferInfo();
         MediaCodec.BufferInfo encodedInfo = new MediaCodec.BufferInfo();
         int sampleRate = 0;
         int channels = 0;
+        int decodedChannels = 0;
         int frameBytes = 0;
         int pendingDecoderIndex = -1;
         ByteBuffer pendingPcm = null;
@@ -219,7 +227,7 @@ final class AudioPipeline {
                 }
 
                 if (decoderDone && pendingPcm == null && !encoderInputDone) {
-                    if (encoder == null) throw new IOException("这个视频的音轨没有可解码的音频数据。" );
+                    if (encoder == null) throw new IOException("这个文件的音轨没有可解码的音频数据。" );
                     int index = encoder.dequeueInputBuffer(0);
                     if (index >= 0) {
                         encoder.queueInputBuffer(index, 0, 0, encoderInputEndUs,
@@ -238,12 +246,14 @@ final class AudioPipeline {
                         requirePcm16(pcmFormat);
                         if (encoder == null) {
                             sampleRate = actualRate;
-                            channels = actualChannels;
+                            decodedChannels = actualChannels;
+                            if (decodedChannels > 8) throw new IOException("暂不支持超过 8 个声道的录音。");
+                            channels = compress ? 1 : actualChannels;
                             frameBytes = channels * 2;
-                            encoderOwner.handle = createEncoder(sampleRate, channels);
+                            encoderOwner.handle = createEncoder(sampleRate, channels, compress);
                             encoder = encoderOwner.handle.codec;
-                        } else if (actualRate != sampleRate || actualChannels != channels) {
-                            throw new IOException("这个视频的音轨在中途改变了采样率或声道，暂不支持。" );
+                        } else if (actualRate != sampleRate || actualChannels != decodedChannels) {
+                            throw new IOException("这个文件的音轨在中途改变了采样率或声道，暂不支持。" );
                         }
                         moved = true;
                     } else if (index >= 0) {
@@ -255,7 +265,7 @@ final class AudioPipeline {
                                 decoder.releaseOutputBuffer(index, false);
                                 throw new IOException("音频解码器未提供 PCM 格式。" );
                             }
-                            if (decodedInfo.size % frameBytes != 0) {
+                            if (decodedInfo.size % (decodedChannels * 2) != 0) {
                                 decoder.releaseOutputBuffer(index, false);
                                 throw new IOException("解码后的音频数据不完整。" );
                             }
@@ -263,7 +273,7 @@ final class AudioPipeline {
                             validateRange(pcm, decodedInfo.offset, decodedInfo.size);
                             pcm.position(decodedInfo.offset);
                             pcm.limit(decodedInfo.offset + decodedInfo.size);
-                            pendingPcm = pcm.slice();
+                            pendingPcm = compress ? Pcm16.mono(pcm.slice(), decodedChannels) : pcm.slice();
                             pendingDecoderIndex = index;
                             pendingBytesConsumed = 0;
                             pendingEos = eos;
@@ -318,12 +328,12 @@ final class AudioPipeline {
                     lastActivityMs = SystemClock.elapsedRealtime();
                 } else {
                     if (SystemClock.elapsedRealtime() - lastActivityMs > STALL_TIMEOUT_MS) {
-                        throw new IOException("手机音频编解码器长时间没有响应，请换一个视频再试。" );
+                        throw new IOException("手机音频编解码器长时间没有响应，请换一个文件再试。" );
                     }
                     SystemClock.sleep(2);
                 }
             }
-            if (packetCount == 0) throw new IOException("这个视频的音轨没有可提取的音频数据。" );
+            if (packetCount == 0) throw new IOException("这个文件的音轨没有可提取的音频数据。" );
             long durationUs = Math.max(encoderInputEndUs,
                     lastEncodedUs + 1_024_000_000L / sampleRate);
             muxer.finish(durationUs);
@@ -331,11 +341,12 @@ final class AudioPipeline {
         }
     }
 
-    private static CodecHandle createEncoder(int sampleRate, int channels) throws IOException {
+    private static CodecHandle createEncoder(int sampleRate, int channels, boolean compress) throws IOException {
         if (channels > 8) throw new IOException("这个音轨的声道数量暂不支持 AAC 转换。" );
         MediaFormat format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, channels);
         format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, Math.min(320_000, Math.max(96_000, channels * 64_000)));
+        format.setInteger(MediaFormat.KEY_BIT_RATE, compress ? 32_000
+                : Math.min(320_000, Math.max(96_000, channels * 64_000)));
         format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024);
         format.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT);
         String codecName = new MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(format);
@@ -363,13 +374,13 @@ final class AudioPipeline {
 
     private static void requireClearSample(int flags) throws IOException {
         if ((flags & MediaExtractor.SAMPLE_FLAG_ENCRYPTED) != 0) {
-            throw new IOException("这个视频的音轨受 DRM 加密保护，无法提取。" );
+            throw new IOException("这个文件的音轨受 DRM 加密保护，无法提取。" );
         }
     }
 
     private static int requiredPositive(MediaFormat format, String key) throws IOException {
         int value = AudioExtractor.getInt(format, key, 0);
-        if (value <= 0) throw new IOException("视频音轨缺少有效的采样率或声道信息。" );
+        if (value <= 0) throw new IOException("音轨缺少有效的采样率或声道信息。" );
         return value;
     }
 
@@ -389,7 +400,7 @@ final class AudioPipeline {
     }
 
     private static IOException invalidTimestamp() {
-        return new IOException("这个视频的音轨时间戳异常，无法完整提取。" );
+        return new IOException("这个文件的音轨时间戳异常，无法完整提取。" );
     }
 
     private static final class CodecHandle implements AutoCloseable {

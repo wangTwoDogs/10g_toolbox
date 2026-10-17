@@ -1,0 +1,4 @@
+<resources>
+    <item name="tool_extract" type="id" />
+    <item name="tool_compress" type="id" />
+</resources>

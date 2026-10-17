@@ -34,6 +34,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -178,6 +179,72 @@ public final class AudioExtractorInstrumentedTest {
     }
 
     @Test(timeout = 30_000)
+    public void compressionMixesStereoAndPreservesOriginalAndDuration() throws Exception {
+        File source = file("stereo-recording.wav");
+        File output = file("small-recording.m4a");
+        MediaFixtures.writePcmWav(source, 2);
+        byte[] original = Files.readAllBytes(source.toPath());
+        List<Integer> progress = new ArrayList<>();
+        AudioExtractor.Result result = AudioExtractor.compress(context, Uri.fromFile(source),
+                Uri.fromFile(output), new CancellationSignal(), progress::add);
+        assertTrue(result.transcoded);
+        assertEquals(1, result.channelCount);
+        assertEquals(original.length, result.inputBytes);
+        assertTrue("Recording must shrink substantially", output.length() < original.length / 3);
+        assertArrayEquals(original, Files.readAllBytes(source.toPath()));
+        assertTrue("Right-channel speech must survive mono mixing", decodesToNonSilentPcm(output));
+        assertTrue("Recording must keep its duration", Math.abs(result.durationUs
+                - 20 * 1024 * 1_000_000L / MediaFixtures.SAMPLE_RATE) < 100_000);
+        assertCompletedProgress(progress);
+    }
+
+    @Test(timeout = 30_000)
+    public void compressionReencodesExistingAacInsteadOfCopyingIt() throws Exception {
+        File source = file("large-recording.m4a");
+        File output = file("reencoded-recording.m4a");
+        MediaFixtures.writeAac(source);
+        AudioExtractor.Result result = AudioExtractor.compress(context, Uri.fromFile(source),
+                Uri.fromFile(output), new CancellationSignal(), null);
+        assertTrue("AAC input must also be reencoded", result.transcoded);
+        assertTrue("AAC recording must shrink", output.length() < source.length());
+        assertTrue(decodesToNonSilentPcm(output));
+    }
+
+    @Test(timeout = 30_000)
+    public void compressionRejectsLargerResultBeforeWritingDestination() throws Exception {
+        File source = file("already-small.m4a");
+        File output = file("must-not-grow.m4a");
+        MediaFixtures.writeAac(source, 8_000);
+        IOException error = assertThrows(IOException.class, () -> AudioExtractor.compress(context,
+                Uri.fromFile(source), Uri.fromFile(output), new CancellationSignal(), null));
+        assertTrue(error.getMessage().contains("没有变小"));
+        assertFalse(output.exists());
+    }
+
+    @Test(timeout = 30_000)
+    public void cancellationDuringCompressionCleansItsTemporaryFile() throws Exception {
+        File source = file("cancel-recording.wav");
+        File output = file("cancel-recording.m4a");
+        MediaFixtures.writePcmWav(source, 2);
+        String[] before = context.getCacheDir().list((dir, name) -> name.startsWith("audio-extract-"));
+        CancellationSignal cancellation = new CancellationSignal();
+        List<Integer> progress = new ArrayList<>();
+        assertThrows(OperationCanceledException.class, () -> AudioExtractor.compress(context,
+                Uri.fromFile(source), Uri.fromFile(output), cancellation,
+                percent -> {
+                    progress.add(percent);
+                    // The pipeline throttles callbacks for 150 ms. Give this short fixture
+                    // an observable in-flight update instead of canceling after success (100).
+                    if (percent == 0) SystemClock.sleep(200);
+                    else if (percent < 100) cancellation.cancel();
+                }));
+        assertTrue(cancellation.isCanceled());
+        assertFalse(progress.contains(100));
+        assertArrayEquals(before, context.getCacheDir().list((dir, name) -> name.startsWith("audio-extract-")));
+        assertFalse(output.exists());
+    }
+
+    @Test(timeout = 30_000)
     public void videoWithoutAudioIsRejectedBeforeCreatingDestination() throws Exception {
         File source = file("silent-video.mp4");
         File output = file("no-audio.m4a");
@@ -211,6 +278,15 @@ public final class AudioExtractorInstrumentedTest {
 
     @Test(timeout = 45_000)
     public void visibleActivityCanRunRealForegroundExtractionService() throws Exception {
+        runForegroundService(false);
+    }
+
+    @Test(timeout = 45_000)
+    public void compressionServiceReportsSizesAndSurvivesActivityRecreation() throws Exception {
+        runForegroundService(true);
+    }
+
+    private void runForegroundService(boolean compress) throws Exception {
         File source = file("service-source.wav");
         File output = file("service-output.m4a");
         MediaFixtures.writePcmWav(source);
@@ -218,11 +294,13 @@ public final class AudioExtractorInstrumentedTest {
         Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
         Activity activity = instrumentation.startActivitySync(new Intent(context, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        AtomicReference<Activity> activeActivity = new AtomicReference<>(activity);
         Intent serviceIntent = new Intent(context, ExtractionService.class)
                 .setAction(ExtractionService.ACTION_START)
                 .putExtra(ExtractionService.EXTRA_INPUT, Uri.fromFile(source))
                 .putExtra(ExtractionService.EXTRA_OUTPUT, Uri.fromFile(output))
-                .putExtra(ExtractionService.EXTRA_NAME, output.getName());
+                .putExtra(ExtractionService.EXTRA_NAME, output.getName())
+                .putExtra(ExtractionService.EXTRA_COMPRESS, compress);
         try {
             instrumentation.waitForIdleSync();
             AtomicReference<RuntimeException> startupError = new AtomicReference<>();
@@ -249,6 +327,26 @@ public final class AudioExtractorInstrumentedTest {
                     ExtractionStore.Phase.SUCCESS, state.phase);
             assertEquals(Uri.fromFile(output), state.output);
             assertEquals(output.length(), state.outputBytes);
+            assertEquals(compress, state.compressed);
+            if (compress) {
+                assertEquals(sourceBytes, state.inputBytes);
+                assertTrue(output.length() < sourceBytes);
+                assertTrue(decodesToNonSilentPcm(output));
+                Instrumentation.ActivityMonitor monitor = instrumentation.addMonitor(
+                        MainActivity.class.getName(), null, false);
+                try {
+                    instrumentation.runOnMainSync(activity::recreate);
+                    Activity restored = monitor.waitForActivityWithTimeout(5_000);
+                    assertTrue("Activity must recreate", restored != null);
+                    activeActivity.set(restored);
+                    instrumentation.waitForIdleSync();
+                    instrumentation.runOnMainSync(() -> assertTrue("Compression tool must stay selected",
+                            ((com.google.android.material.button.MaterialButton) restored.findViewById(
+                                    R.id.tool_compress)).isChecked()));
+                } finally {
+                    instrumentation.removeMonitor(monitor);
+                }
+            }
             assertTrue(state.outputBytes > 0);
             assertTrue(state.durationUs > 0);
             AudioSamples audio = readAudioSamples(output);
@@ -270,8 +368,8 @@ public final class AudioExtractorInstrumentedTest {
                 }
             }
             instrumentation.runOnMainSync(() -> {
-                activity.stopService(serviceIntent);
-                activity.finish();
+                activeActivity.get().stopService(serviceIntent);
+                activeActivity.get().finish();
             });
             instrumentation.waitForIdleSync();
             assertFalse("Service did not stop after cancellation; fixtures may still be in use",

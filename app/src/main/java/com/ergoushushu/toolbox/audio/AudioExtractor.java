@@ -2,12 +2,14 @@ package com.ergoushushu.toolbox.audio;
 
 import android.content.Context;
 import android.content.res.AssetFileDescriptor;
+import android.database.Cursor;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.net.Uri;
 import android.os.CancellationSignal;
 import android.os.OperationCanceledException;
 import android.os.SystemClock;
+import android.provider.OpenableColumns;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -48,13 +50,17 @@ public final class AudioExtractor {
         public final int sampleRate;
         public final int channelCount;
 
-        private Result(AudioInfo source, AudioPipeline.Stats stats, long outputBytes) {
+        public final long inputBytes;
+
+        private Result(AudioInfo source, AudioPipeline.Stats stats, long outputBytes,
+                       boolean compress, long inputBytes) {
             sourceMime = source.mimeType;
-            transcoded = source.willTranscode;
+            transcoded = compress || source.willTranscode;
             durationUs = stats.durationUs;
             this.outputBytes = outputBytes;
             sampleRate = stats.sampleRate;
             channelCount = stats.channelCount;
+            this.inputBytes = inputBytes;
         }
     }
 
@@ -65,7 +71,7 @@ public final class AudioExtractor {
             openInput(context, input, extractor, null);
             return new AudioInfo(firstAudioTrack(extractor).format);
         } catch (RuntimeException error) {
-            throw new IOException("无法读取这个视频，请选择手机上可以播放的视频文件。", error);
+            throw new IOException("无法读取文件，请选择手机上可以播放的音视频文件。", error);
         } finally {
             extractor.release();
         }
@@ -79,8 +85,20 @@ public final class AudioExtractor {
     public static Result extract(Context context, Uri input, Uri output,
                                  CancellationSignal cancellation, Listener listener)
             throws IOException {
+        return process(context, input, output, cancellation, listener, false);
+    }
+
+    /** Re-encodes even AAC inputs as 32 kbps mono AAC; never replaces the original recording. */
+    public static Result compress(Context context, Uri input, Uri output,
+                                  CancellationSignal cancellation, Listener listener) throws IOException {
+        return process(context, input, output, cancellation, listener, true);
+    }
+
+    private static Result process(Context context, Uri input, Uri output,
+                                  CancellationSignal cancellation, Listener listener,
+                                  boolean compress) throws IOException {
         if (input == null || output == null || input.equals(output)) {
-            throw new IOException("请选择视频，并另存为一个新的音频文件。" );
+            throw new IOException("请选择源文件，并另存为一个新的音频文件。" );
         }
         MediaExtractor extractor = new MediaExtractor();
         try {
@@ -88,33 +106,50 @@ public final class AudioExtractor {
             openInput(context, input, extractor, cancellation);
             Track track = firstAudioTrack(extractor);
             AudioInfo source = new AudioInfo(track.format);
+            long inputBytes = sourceBytes(context, input);
             extractor.selectTrack(track.index);
             Progress progress = new Progress(source.durationUs, listener);
             progress.initial();
             try (TemporaryFile temporary = new TemporaryFile(context.getCacheDir())) {
-                AudioPipeline.Stats stats = source.willTranscode
+                AudioPipeline.Stats stats = (compress || source.willTranscode)
                         ? AudioPipeline.transcode(extractor, track.format, temporary.file,
-                                cancellation, progress)
+                                cancellation, progress, compress)
                         : AudioPipeline.remux(extractor, track.format, temporary.file,
                                 cancellation, progress);
                 checkCanceled(cancellation);
                 long bytes = temporary.file.length();
+                if (compress && inputBytes > 0 && bytes >= inputBytes) {
+                    throw new IOException("这份录音已经很小，压缩后没有变小。请继续使用原文件。");
+                }
                 copyToDocument(context, temporary.file, output, bytes, cancellation, progress);
                 checkCanceled(cancellation);
                 // Do not announce success until the cache file has also been cleaned up.
                 temporary.close();
                 progress.complete();
-                return new Result(source, stats, bytes);
+                return new Result(source, stats, bytes, compress, inputBytes);
             }
         } catch (OperationCanceledException canceled) {
             throw canceled;
         } catch (SecurityException denied) {
-            throw new IOException("文件访问权限已失效，请重新选择视频和保存位置。", denied);
+            throw new IOException("文件访问权限已失效，请重新选择源文件和保存位置。", denied);
         } catch (RuntimeException error) {
-            throw new IOException("这个视频的音频格式暂不受当前手机支持，或文件已损坏。", error);
+            throw new IOException("这个文件的音频格式暂不受当前手机支持，或文件已损坏。", error);
         } finally {
             extractor.release();
         }
+    }
+
+    public static long sourceBytes(Context context, Uri input) {
+        if ("file".equals(input.getScheme()) && input.getPath() != null) {
+            return new File(input.getPath()).length();
+        }
+        try (Cursor cursor = context.getContentResolver().query(input,
+                new String[]{OpenableColumns.SIZE}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getLong(0);
+        } catch (RuntimeException ignored) { /* Not all providers expose a size. */ }
+        try (AssetFileDescriptor descriptor = context.getContentResolver().openAssetFileDescriptor(input, "r")) {
+            return descriptor == null ? -1 : descriptor.getLength();
+        } catch (IOException | RuntimeException ignored) { return -1; }
     }
 
     private static void openInput(Context context, Uri input, MediaExtractor extractor,
@@ -122,11 +157,11 @@ public final class AudioExtractor {
             throws IOException {
         if (input == null || !("content".equals(input.getScheme())
                 || "file".equals(input.getScheme()))) {
-            throw new IOException("请通过文件选择器选择本地视频。" );
+            throw new IOException("请通过文件选择器选择本地音视频文件。" );
         }
         try (AssetFileDescriptor descriptor = context.getContentResolver()
                 .openAssetFileDescriptor(input, "r", cancellation)) {
-            if (descriptor == null) throw new IOException("无法打开所选视频。" );
+            if (descriptor == null) throw new IOException("无法打开所选文件。" );
             extractor.setDataSource(descriptor);
         }
     }
@@ -137,7 +172,7 @@ public final class AudioExtractor {
             String mime = format.getString(MediaFormat.KEY_MIME);
             if (mime != null && mime.startsWith("audio/")) return new Track(index, format);
         }
-        throw new IOException("这个视频没有音轨，无法提取音频。" );
+        throw new IOException("这个文件没有音轨，无法处理。" );
     }
 
     private static void copyToDocument(Context context, File source, Uri output, long total,
